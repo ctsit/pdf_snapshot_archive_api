@@ -1,0 +1,4 @@
+# Manual test configuration and outputs
+tests/manual/.env
+tests/manual/credentials.csv
+tests/manual/output/

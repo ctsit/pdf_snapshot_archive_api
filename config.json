@@ -1,0 +1,30 @@
+{
+    "name": "PDF Snapshot Archive API",
+    "description": "Extends the REDCap API to list and download items from the PDF Snapshot Archive folder of the File Repository.",
+    "namespace": "UF_CTSI\\PdfSnapshotArchiveApi",
+    "documentation": "README.md",
+    "framework-version": 17,
+    "authors": [
+        {
+            "name": "University of Florida CTS-IT",
+            "email": "CTSIT-REDCAP-MODULE-SUPPO@LISTS.UFL.EDU",
+            "institution": "University of Florida - CTSI"
+        }
+    ],
+    "include-authors-in-api-info": true,
+    "api-actions": {
+        "list-items": {
+            "description": "Lists every item in the PDF Snapshot Archive visible to the token's user. Returns <i>item_id</i>, <i>filename</i>, and <i>record</i> for each item. Optionally filter with the <code>record</code> parameter. Supports <code>returnFormat</code> json (default) or csv."
+        },
+        "get-item": {
+            "description": "Returns every attribute of the PDF Snapshot Archive item specified by <code>item_id</code>, except the file itself. Supports <code>returnFormat</code> json (default) or csv."
+        },
+        "get-file": {
+            "description": "Downloads the PDF file of the PDF Snapshot Archive item specified by <code>item_id</code>."
+        }
+    },
+    "compatibility": {
+        "redcap-version-min": "17.5.0",
+        "php-version-min": "8.0.0"
+    }
+}

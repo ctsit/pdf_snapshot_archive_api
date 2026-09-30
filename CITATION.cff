@@ -1,0 +1,40 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: REDCap PDF Snapshot Archive API External Module
+message:
+  If you use this software, please cite it using the metadata
+  in CITATION.cff
+type: software
+authors:
+  - family-names: Chase
+    given-names: Philip B
+    email: pbc@ufl.edu
+    affiliation: University of Florida
+    orcid: https://orcid.org/0000-0002-5318-9420
+  - family-names: Stoffs
+    given-names: Taryn L
+    email: tls@ufl.edu
+    affiliation: University of Florida
+    orcid: https://orcid.org/0000-0002-0830-8179
+repository-code:
+  https://github.com/ctsit/pdf_snapshot_archive_api/
+url:
+  https://github.com/ctsit/pdf_snapshot_archive_api/
+abstract:
+  PDF Snapshot Archive API is a REDCap External Module that extends
+  the REDCap API to reach the PDF Snapshot Archive folder of the
+  File Repository. It adds list-items, get-item, and get-file
+  actions so API users can list archived PDF snapshots, read their
+  attributes, and download the files.
+keywords:
+  - redcap
+  - clinical science
+  - data management
+  - "redcap repo"
+  - "redcap external module"
+  - "pdf snapshot"
+  - api
+license: Apache-2.0
+version: 0.0.0
