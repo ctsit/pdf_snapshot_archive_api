@@ -4,13 +4,24 @@
  *
  * Usage: php tests/manual/test_api.php
  *
- * Reads TEST_PROJECT_PID from tests/manual/.env, then reads the matching row
- * of tests/manual/credentials.csv (REDCapR::retrieve_credential_local() format).
+ * Reads TEST_PROJECT_PID from <config dir>/.env, then reads the matching row
+ * of <config dir>/credentials.csv (REDCapR::retrieve_credential_local() format).
+ * Responses are saved to <config dir>/output/.
+ *
+ * <config dir> is $REDCAP_EM_TEST_DIR if set, else tests/manual/. Set
+ * REDCAP_EM_TEST_DIR to a directory outside the module whenever the module
+ * directory is web-served, or the web server will serve these files.
  */
+
+// This file lives inside a web-served module directory; never run it from a web request
+if (PHP_SAPI !== 'cli') {
+	http_response_code(404);
+	exit;
+}
 
 const PREFIX = 'pdf_snapshot_archive_api';
 
-$dir = __DIR__;
+$dir = rtrim(getenv('REDCAP_EM_TEST_DIR') ?: __DIR__, '/');
 
 function load_env(string $path): array {
 	if (!is_file($path)) {
@@ -74,10 +85,11 @@ function check(string $label, bool $ok, string $detail = ''): void {
 }
 
 function save_output(string $name, string $contents): string {
-	$out_dir = __DIR__ . '/output';
+	global $dir;
+	$out_dir = "$dir/output";
 	if (!is_dir($out_dir)) mkdir($out_dir, 0775, true);
 	file_put_contents("$out_dir/$name", $contents);
-	return "output/$name";
+	return "$out_dir/$name";
 }
 
 function snippet(string $body): string {

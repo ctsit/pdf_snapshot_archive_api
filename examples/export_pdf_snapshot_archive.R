@@ -11,7 +11,8 @@
 #
 # Writes:
 #   <output_dir>/pdf_snapshot_archive.csv  one row per item, from get-item
-#   <output_dir>/files/                    one PDF per item, from get-file
+#   <output_dir>/files/                    one PDF per item, from get-file,
+#                                          named <item_id>_<filename>
 #
 # Requires the REDCap PDF Snapshot Archive API module enabled on the project, and
 # the R packages REDCapR, httr2, jsonlite, dplyr, purrr, readr, and tibble.
@@ -37,10 +38,11 @@ if (!startsWith(credential$redcap_uri, "https://")) {
   message("Warning: ", credential$redcap_uri, " is not an https address; the token is sent unencrypted.")
 }
 
-# POST one module API action. Returns the httr2 response; stops on HTTP errors
-# unless allow_error is TRUE.
-api_call <- function(action, ..., allow_error = FALSE) {
-  httr2::request(credential$redcap_uri) |>
+# POST one module API action and return the httr2 response. Any failure,
+# whether an HTTP error status or a network error such as a timeout, stops with
+# a message that the per-item code records instead of aborting the export.
+api_call <- function(action, ...) {
+  resp <- httr2::request(credential$redcap_uri) |>
     httr2::req_body_form(
       token = credential$token,
       content = "externalModule",
@@ -48,9 +50,13 @@ api_call <- function(action, ..., allow_error = FALSE) {
       action = action,
       ...
     ) |>
-    httr2::req_error(is_error = function(resp) !allow_error && httr2::resp_is_error(resp)) |>
+    httr2::req_error(is_error = \(resp) FALSE) |>
     httr2::req_timeout(300) |>
     httr2::req_perform()
+  if (httr2::resp_is_error(resp)) {
+    stop(sprintf("HTTP %d: %s", httr2::resp_status(resp), httr2::resp_body_string(resp)), call. = FALSE)
+  }
+  resp
 }
 
 api_json <- function(action, ...) {
@@ -59,24 +65,59 @@ api_json <- function(action, ...) {
     jsonlite::fromJSON(simplifyVector = FALSE)
 }
 
-# Fetch one item's attributes, download its PDF to files_dir, and return a
-# one-row tibble describing both. JSON nulls become NA so rows bind together.
-export_item <- function(item_id, local_name, files_dir) {
-  row <- api_json("get-item", item_id = item_id) |>
-    purrr::map(\(x) x %||% NA) |>
-    tibble::as_tibble()
+# An error message on one line, for the log and the CSV
+error_text <- function(e) gsub("\\s+", " ", conditionMessage(e))
 
-  resp <- api_call("get-file", item_id = item_id, allow_error = TRUE)
-  if (httr2::resp_is_error(resp)) {
-    status <- sprintf("HTTP %d: %s", httr2::resp_status(resp), httr2::resp_body_string(resp))
-    message("Item ", item_id, ": download failed, ", status)
-    return(dplyr::mutate(row, local_file = NA_character_, download_status = status))
+# Evaluate expr, returning "ok" or the error message so one item's failure
+# never stops the export.
+status_of <- function(expr) {
+  tryCatch({
+    force(expr)
+    "ok"
+  }, error = error_text)
+}
+
+# get-item as a one-row tibble. JSON nulls become NA so rows bind together.
+get_item_row <- function(item_id) {
+  api_json("get-item", item_id = item_id) |>
+    purrr::map(\(x) if (is.null(x)) NA else x) |>
+    tibble::as_tibble()
+}
+
+# Fetch one item's attributes and download its PDF to files_dir. Returns a
+# one-row tibble with the attributes plus the outcome of each step. If get-item
+# fails, the row keeps the item_id, doc_name, and record from list-items.
+export_item <- function(item_id, filename, record, local_name, files_dir) {
+  details <- tryCatch(
+    list(row = get_item_row(item_id), status = "ok"),
+    error = \(e) list(
+      row = tibble::tibble(item_id = item_id, doc_name = filename, record = record),
+      status = error_text(e)
+    )
+  )
+  if (details$status != "ok") {
+    message("Item ", item_id, ": get-item failed, ", details$status)
   }
 
   local_file <- file.path("files", local_name)
-  writeBin(httr2::resp_body_raw(resp), file.path(files_dir, local_name))
-  message("Item ", item_id, ": saved ", local_file)
-  dplyr::mutate(row, local_file = local_file, download_status = "ok")
+  download_status <- status_of(
+    # returnFormat only affects the format of error messages here
+    api_call("get-file", item_id = item_id, returnFormat = "json") |>
+      httr2::resp_body_raw() |>
+      writeBin(file.path(files_dir, local_name))
+  )
+  if (download_status == "ok") {
+    message("Item ", item_id, ": saved ", local_file)
+  } else {
+    message("Item ", item_id, ": download failed, ", download_status)
+  }
+
+  dplyr::mutate(
+    details$row,
+    local_file = if (download_status == "ok") local_file else NA_character_,
+    details_status = details$status,
+    download_status = download_status
+  )
 }
 
 items <- api_json("list-items") |> dplyr::bind_rows()
@@ -93,20 +134,18 @@ if (nrow(items) == 0) {
 }
 
 details <- items |>
-  dplyr::mutate(
-    local_name = basename(filename),
-    # Prefix duplicated filenames with the item_id so no download overwrites another
-    local_name = dplyr::if_else(
-      duplicated(local_name) | duplicated(local_name, fromLast = TRUE),
-      paste0(item_id, "_", local_name),
-      local_name
-    )
-  ) |>
-  dplyr::select(item_id, local_name) |>
-  purrr::pmap(\(item_id, local_name) export_item(item_id, local_name, files_dir)) |>
+  # Prefix every filename with its unique item_id so no download overwrites
+  # another, even on case-insensitive filesystems
+  dplyr::mutate(local_name = paste0(item_id, "_", basename(filename))) |>
+  dplyr::select(item_id, filename, record, local_name) |>
+  purrr::pmap(\(item_id, filename, record, local_name) {
+    export_item(item_id, filename, record, local_name, files_dir)
+  }) |>
   dplyr::bind_rows()
 
 readr::write_csv(details, details_path, na = "")
 
 downloaded <- sum(details$download_status == "ok")
 message("Wrote ", details_path, " (", nrow(details), " items) and ", downloaded, " files to ", files_dir)
+failed <- sum(details$details_status != "ok" | details$download_status != "ok")
+if (failed > 0) message(failed, " items had errors; see details_status and download_status in the CSV")

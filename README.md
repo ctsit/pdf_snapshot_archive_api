@@ -85,12 +85,10 @@ The External Module Framework also provides these actions:
 
 | Status | Meaning |
 |---|---|
-| 400 | Missing or invalid `item_id`, or a token that isn't tied to a project |
+| 400 | Missing or invalid `item_id`, an action this module doesn't define, or a token that isn't tied to a project |
 | 403 | The token's user lacks the required rights |
 | 404 | The item doesn't exist, has been deleted, or is outside the user's DAG |
-| 406 | Unsupported `returnFormat` |
 | 500 | The file couldn't be read from storage |
-| 501 | Unknown action |
 
 ## Example: export the whole archive
 
@@ -102,24 +100,31 @@ Rscript examples/export_pdf_snapshot_archive.R credentials.csv 123 my_export
 
 The arguments are a credentials file, a project ID and an optional output directory. The credentials file must be in the format `REDCapR::retrieve_credential_local()` reads. The output directory defaults to `pdf_snapshot_archive_pid<project_id>_<date>`. The script writes:
 
-- `pdf_snapshot_archive.csv`, with one row per item. Each row has every `get-item` attribute, plus `local_file`, the path of the downloaded PDF, and `download_status`, which is `ok` or the error.
-- `files/`, with every PDF in the archive. If two items have the same filename, the item ID is added to the front of each.
+- `pdf_snapshot_archive.csv`, with one row per item. Each row has every `get-item` attribute, plus:
+  - `local_file`: the path of the downloaded PDF.
+  - `details_status`: `ok`, or the `get-item` error.
+  - `download_status`: `ok`, or the `get-file` error.
+- `files/`, with every PDF in the archive. Each file is named `<item_id>_<filename>`, so no download can overwrite another.
 
-The script needs the R packages REDCapR, httr2, jsonlite, dplyr, purrr, readr and tibble. The token's user needs the rights listed under [Access rules](#access-rules). If the user can't download a file, the script records the error in `download_status` and moves on to the next item.
+The script needs R 4.1 or later and the R packages REDCapR, httr2, jsonlite, dplyr, purrr, readr and tibble. The token's user needs the rights listed under [Access rules](#access-rules).
+
+If `get-item` or `get-file` fails for an item, the script records the error and moves on to the next item. This covers HTTP errors such as a missing right, and network errors such as a timeout. When `get-item` fails, the row still has the `item_id`, `doc_name` and `record` from `list-items`.
 
 ## Manual testing
 
-`tests/manual/test_api.php` runs the actions against a real project and prints PASS or FAIL for each check. It needs two files, which git ignores:
+`tests/manual/test_api.php` runs the actions against a real project and prints PASS or FAIL for each check. It reads two files from a config directory:
 
-- `tests/manual/.env` must set `TEST_PROJECT_PID`, the project ID to test against.
-- `tests/manual/credentials.csv` must be in the format `REDCapR::retrieve_credential_local()` reads, with the columns `redcap_uri,username,project_id,token,comment`. `redcap_uri` is the API URL.
+- `.env` must set `TEST_PROJECT_PID`, the project ID to test against.
+- `credentials.csv` must be in the format `REDCapR::retrieve_credential_local()` reads, with the columns `redcap_uri,username,project_id,token,comment`. `redcap_uri` is the API URL.
+
+The config directory is the one named by the `REDCAP_EM_TEST_DIR` environment variable. If that isn't set, it's `tests/manual/`, where git ignores both files. Downloaded files and CSV responses are saved to `output/` in the same directory.
+
+**If your web server serves the module directory, keep these files out of it.** This is usually the case when you test from a working copy inside REDCap's `modules/` folder. The test script refuses web requests, but the server will still hand `.env`, `credentials.csv` and the downloaded PDFs to anyone who asks for them. Put them in a directory outside the web root and point `REDCAP_EM_TEST_DIR` at it.
 
 The token's user needs the rights listed above, and the project should already have at least one item in its PDF Snapshot Archive.
 
 To build a test project, create a new project from [`examples/eConsent_test_project.xml`](examples/eConsent_test_project.xml). It has an e-Consent survey, "Informed Consent", whose PDF snapshots are saved to the File Repository. Complete the survey for a record or two to fill the PDF Snapshot Archive.
 
 ```sh
-php tests/manual/test_api.php
+REDCAP_EM_TEST_DIR=~/redcap_em_test/pdf_snapshot_archive_api php tests/manual/test_api.php
 ```
-
-Downloaded files and CSV responses are saved to `tests/manual/output/`.

@@ -5,6 +5,16 @@ use ExternalModules\AbstractExternalModule;
 
 // API extension documentation
 // https://github.com/vanderbilt-redcap/external-module-framework-docs/blob/main/api.md
+//
+// REDCap core has no public API for the PDF Snapshot Archive, so this module
+// relies on core internals verified against REDCap 17.5.0:
+// - \PdfSnapshot::getPdfSnapshotArchiveFiles() (Classes/PdfSnapshot.php) supplies
+//   the archive rows, exactly as the File Repository page lists them.
+// - \Econsent::econsentEnabledForSurvey() (Classes/Econsent.php) flags e-Consent PDFs.
+// - The access rules mirror FileRepository::getFileList() for the 'pdf_archive'
+//   folder and FileRepository::download() (Classes/FileRepository.php).
+// If a REDCap upgrade renames these methods, changes the archive row columns, or
+// changes the File Repository's rights checks, revisit this module against them.
 
 /**
  * An error that maps directly to an HTTP status code in the API response.
@@ -44,14 +54,14 @@ class PdfSnapshotArchiveApi extends AbstractExternalModule {
 	 * Returns the token user's rights on the project, mirroring the File Repository
 	 * requirement that the user have the File Repository right to see the PDF Snapshot Archive.
 	 * A non-super-user without the File Repository right gets a 403.
+	 * REDCap::getUserRights() also parses form-level export rights into 'forms_export'.
 	 */
 	function getTokenUserRights($project_id, $user_id): array {
-		$user = $this->framework->getUser($user_id);
-		$rights = $user->getRights($project_id);
+		$rights = current(\REDCap::getUserRights($user_id, $project_id));
 		if (!is_array($rights)) {
 			throw new ApiError("The token's user does not have access to this project.", 403);
 		}
-		$rights['is_super_user'] = $user->isSuperUser();
+		$rights['is_super_user'] = $this->framework->getUser($user_id)->isSuperUser();
 		if (!$rights['is_super_user'] && $rights['file_repository'] != '1') {
 			throw new ApiError("You do not have File Repository privileges in this project.", 403);
 		}
@@ -136,7 +146,7 @@ class PdfSnapshotArchiveApi extends AbstractExternalModule {
 		$file = $this->fetchItem($Proj, $rights, $payload);
 
 		if (!$rights['is_super_user']) {
-			$forms_export = \UserRights::convertFormRightsToArray($rights['data_export_instruments']);
+			$forms_export = $rights['forms_export'] ?? [];
 			if (!in_array('1', array_map('strval', $forms_export), true)) {
 				throw new ApiError("You do not have Full Data Set export privileges in this project.", 403);
 			}
@@ -146,11 +156,13 @@ class PdfSnapshotArchiveApi extends AbstractExternalModule {
 			}
 		}
 
-		// Timestamp prefix lets REDCap's temp file cleanup remove the copy
-		$path = \Files::copyEdocToTemp($file['doc_id'], true, true);
-		if ($path === false) {
+		$contents = \REDCap::getFile($file['doc_id']);
+		if (empty($contents)) {
 			throw new ApiError("The file for item '{$file['doc_id']}' could not be retrieved.", 500);
 		}
+		// The framework deletes this temp file when the request ends
+		$path = $this->framework->createTempFile();
+		file_put_contents($path, $contents[2]);
 
 		\REDCap::logEvent(
 			"Download PDF Snapshot File (API)",
