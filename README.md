@@ -101,6 +101,8 @@ The External Module Framework also provides these actions:
 
 The token's user needs the rights listed above, and the project should already have at least one item in its PDF Snapshot Archive.
 
+To build a test project, create a new project from [`examples/eConsent_test_project.xml`](examples/eConsent_test_project.xml). It has an e-Consent survey, "Informed Consent", whose PDF snapshots are saved to the File Repository. Complete the survey for a record or two to fill the PDF Snapshot Archive.
+
 ```sh
 php tests/manual/test_api.php
 Rscript tests/manual/test_api.R
