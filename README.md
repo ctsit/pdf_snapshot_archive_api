@@ -92,9 +92,24 @@ The External Module Framework also provides these actions:
 | 500 | The file couldn't be read from storage |
 | 501 | Unknown action |
 
+## Example: export the whole archive
+
+[`examples/export_pdf_snapshot_archive.R`](examples/export_pdf_snapshot_archive.R) exports a project's entire PDF Snapshot Archive. It calls `list-items`, then calls `get-item` and `get-file` for every item.
+
+```sh
+Rscript examples/export_pdf_snapshot_archive.R credentials.csv 123 my_export
+```
+
+The arguments are a credentials file, a project ID and an optional output directory. The credentials file must be in the format `REDCapR::retrieve_credential_local()` reads. The output directory defaults to `pdf_snapshot_archive_pid<project_id>_<date>`. The script writes:
+
+- `pdf_snapshot_archive.csv`, with one row per item. Each row has every `get-item` attribute, plus `local_file`, the path of the downloaded PDF, and `download_status`, which is `ok` or the error.
+- `files/`, with every PDF in the archive. If two items have the same filename, the item ID is added to the front of each.
+
+The script needs the R packages REDCapR, httr2, jsonlite, dplyr, purrr, readr and tibble. The token's user needs the rights listed under [Access rules](#access-rules). If the user can't download a file, the script records the error in `download_status` and moves on to the next item.
+
 ## Manual testing
 
-`tests/manual/test_api.php` and `tests/manual/test_api.R` run the actions against a real project and print PASS or FAIL for each check. Both scripts need two files, which git ignores:
+`tests/manual/test_api.php` runs the actions against a real project and prints PASS or FAIL for each check. It needs two files, which git ignores:
 
 - `tests/manual/.env` must set `TEST_PROJECT_PID`, the project ID to test against.
 - `tests/manual/credentials.csv` must be in the format `REDCapR::retrieve_credential_local()` reads, with the columns `redcap_uri,username,project_id,token,comment`. `redcap_uri` is the API URL.
@@ -105,7 +120,6 @@ To build a test project, create a new project from [`examples/eConsent_test_proj
 
 ```sh
 php tests/manual/test_api.php
-Rscript tests/manual/test_api.R
 ```
 
-Downloaded files are saved to `tests/manual/output/`.
+Downloaded files and CSV responses are saved to `tests/manual/output/`.
