@@ -10,7 +10,7 @@ REDCap's File Repository API methods can't reach this folder. It is a virtual fo
 
 ## Installation
 
-- Clone this repo into `<redcap-root>/modules/pdf_snapshot_archive_api_v0.0.0`.
+- Clone this repo into `<redcap-root>/modules/pdf_snapshot_archive_api_v1.0.0`.
 - Enable the module in the Control Center, then enable it on each project that needs it.
 
 ## Access rules
