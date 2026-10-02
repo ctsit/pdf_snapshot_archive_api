@@ -10,7 +10,7 @@
 # the API URL. output_dir defaults to pdf_snapshot_archive_pid<project_id>_<date>.
 #
 # Writes:
-#   <output_dir>/pdf_snapshot_archive.csv  one row per item, from get-item
+#   <output_dir>/pdf_snapshot_archive.csv  one row per item, from get-items
 #   <output_dir>/files/                    one PDF per item, from get-file,
 #                                          named <item_id>_<filename>
 #
@@ -68,59 +68,28 @@ api_json <- function(action, ...) {
 # An error message on one line, for the log and the CSV
 error_text <- function(e) gsub("\\s+", " ", conditionMessage(e))
 
-# Evaluate expr, returning "ok" or the error message so one item's failure
-# never stops the export.
-status_of <- function(expr) {
-  tryCatch({
-    force(expr)
-    "ok"
-  }, error = error_text)
-}
-
-# get-item as a one-row tibble. JSON nulls become NA so rows bind together.
-get_item_row <- function(item_id) {
-  api_json("get-item", item_id = item_id) |>
-    purrr::map(\(x) if (is.null(x)) NA else x) |>
-    tibble::as_tibble()
-}
-
-# Fetch one item's attributes and download its PDF to files_dir. Returns a
-# one-row tibble with the attributes plus the outcome of each step. If get-item
-# fails, the row keeps the item_id, doc_name, and record from list-items.
-export_item <- function(item_id, filename, record, local_name, files_dir) {
-  details <- tryCatch(
-    list(row = get_item_row(item_id), status = "ok"),
-    error = \(e) list(
-      row = tibble::tibble(item_id = item_id, doc_name = filename, record = record),
-      status = error_text(e)
-    )
-  )
-  if (details$status != "ok") {
-    message("Item ", item_id, ": get-item failed, ", details$status)
-  }
-
-  local_file <- file.path("files", local_name)
-  download_status <- status_of(
+# Download one item's PDF to files_dir. Returns "ok" or the error message, so
+# one item's failure never stops the export.
+download_item <- function(item_id, local_name, files_dir) {
+  status <- tryCatch({
     # returnFormat only affects the format of error messages here
     api_call("get-file", item_id = item_id, returnFormat = "json") |>
       httr2::resp_body_raw() |>
       writeBin(file.path(files_dir, local_name))
-  )
-  if (download_status == "ok") {
-    message("Item ", item_id, ": saved ", local_file)
+    "ok"
+  }, error = error_text)
+  if (status == "ok") {
+    message("Item ", item_id, ": saved ", file.path("files", local_name))
   } else {
-    message("Item ", item_id, ": download failed, ", download_status)
+    message("Item ", item_id, ": download failed, ", status)
   }
-
-  dplyr::mutate(
-    details$row,
-    local_file = if (download_status == "ok") local_file else NA_character_,
-    details_status = details$status,
-    download_status = download_status
-  )
+  status
 }
 
-items <- api_json("list-items") |> dplyr::bind_rows()
+# Every attribute of every item in one call. JSON nulls become NA so rows bind together.
+items <- api_json("get-items") |>
+  purrr::map(\(item) purrr::map(item, \(x) if (is.null(x)) NA else x)) |>
+  dplyr::bind_rows()
 message(nrow(items), " items in the PDF Snapshot Archive of project ", project_id)
 
 files_dir <- file.path(output_dir, "files")
@@ -136,16 +105,18 @@ if (nrow(items) == 0) {
 details <- items |>
   # Prefix every filename with its unique item_id so no download overwrites
   # another, even on case-insensitive filesystems
-  dplyr::mutate(local_name = paste0(item_id, "_", basename(filename))) |>
-  dplyr::select(item_id, filename, record, local_name) |>
-  purrr::pmap(\(item_id, filename, record, local_name) {
-    export_item(item_id, filename, record, local_name, files_dir)
-  }) |>
-  dplyr::bind_rows()
+  dplyr::mutate(
+    local_name = paste0(item_id, "_", basename(doc_name)),
+    download_status = purrr::map2_chr(item_id, local_name, \(id, name) download_item(id, name, files_dir)),
+    local_file = dplyr::if_else(download_status == "ok", file.path("files", local_name), NA_character_)
+  ) |>
+  dplyr::select(-local_name) |>
+  dplyr::relocate(download_status, .after = local_file)
 
 readr::write_csv(details, details_path, na = "")
 
 downloaded <- sum(details$download_status == "ok")
 message("Wrote ", details_path, " (", nrow(details), " items) and ", downloaded, " files to ", files_dir)
-failed <- sum(details$details_status != "ok" | details$download_status != "ok")
-if (failed > 0) message(failed, " items had errors; see details_status and download_status in the CSV")
+if (downloaded < nrow(details)) {
+  message(nrow(details) - downloaded, " downloads failed; see download_status in the CSV")
+}

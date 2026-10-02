@@ -13,11 +13,8 @@
     ],
     "include-authors-in-api-info": true,
     "api-actions": {
-        "list-items": {
-            "description": "Lists every item in the PDF Snapshot Archive visible to the token's user. Returns <i>item_id</i>, <i>filename</i>, and <i>record</i> for each item. Optionally filter with the <code>record</code> parameter. Supports <code>returnFormat</code> json (default) or csv."
-        },
-        "get-item": {
-            "description": "Returns every attribute of the PDF Snapshot Archive item specified by <code>item_id</code>, except the file itself. Supports <code>returnFormat</code> json (default) or csv."
+        "get-items": {
+            "description": "Returns every attribute, except the file itself, of every item in the PDF Snapshot Archive visible to the token's user. Optionally narrow the result with <code>item_ids</code> and/or <code>records</code>, each given as an array or a comma-separated list. Supports <code>returnFormat</code> json, csv, or xml."
         },
         "get-file": {
             "description": "Downloads the PDF file of the PDF Snapshot Archive item specified by <code>item_id</code>."

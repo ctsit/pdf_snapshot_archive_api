@@ -1,6 +1,6 @@
 # PDF Snapshot Archive API
 
-This REDCap External Module extends the REDCap API so that API users can list and download items in the **PDF Snapshot Archive** folder of a project's File Repository.
+This REDCap External Module extends the REDCap API so that API users can read the details of, and download, the items in the **PDF Snapshot Archive** folder of a project's File Repository.
 
 REDCap's File Repository API methods can't reach this folder. It is a virtual folder built from `redcap_surveys_pdf_archive`, not a regular File Repository folder. It holds PDF snapshots created by PDF Snapshot triggers and by the e-Consent Framework.
 
@@ -19,7 +19,7 @@ The module applies the same rules as the File Repository page. The rules are che
 
 | Action | Requirement |
 |---|---|
-| `list-items`, `get-item` | File Repository right |
+| `get-items` | File Repository right |
 | `get-file` | File Repository right, and Full Data Set export rights. If the snapshot came from a survey, the user also needs Full Data Set export rights on that instrument. |
 
 - Users in a Data Access Group see only items for records in their DAG.
@@ -36,38 +36,43 @@ Every request is a POST to the REDCap API endpoint with these parameters:
 | `token` | a project API token |
 | `content` | `externalModule` |
 | `prefix` | `pdf_snapshot_archive_api` |
-| `action` | `list-items`, `get-item`, or `get-file` |
+| `action` | `get-items` or `get-file` |
 | `returnFormat` | `json`, `csv`, or `xml`. If it's left out, REDCap defaults to `xml`. |
 
-### list-items
+### get-items
 
-This action lists every archive item the user can see. Each item has three fields:
-- `item_id`
-- `filename`
-- `record`
-
-To list only one record's items, add the `record` parameter.
-
-```sh
-curl -F token=$TOKEN -F content=externalModule -F prefix=pdf_snapshot_archive_api \
-     -F action=list-items -F returnFormat=json https://redcap.example.org/api/
-```
-
-### get-item
-
-This action returns every attribute of the item identified by `item_id`. The file itself isn't included. The attributes are:
+This action returns every attribute of every archive item the user can see. The files themselves aren't included. The attributes are:
+- `item_id`, the ID to pass to `get-file`.
 - The `redcap_surveys_pdf_archive` columns: `doc_id`, `record`, `event_id`, `survey_id`, `instance`, `identifier`, `version`, `type`, `consent_id`, `consent_form_id`, `snapshot_id`, `contains_completed_consent` and `project_id`. `ip` is included only when the system is configured to show it.
 - The file metadata: `doc_name`, `doc_size` and `stored_date`.
 - Fields derived from the project: `form_name`, `survey_title`, `event_name`, `arm_num` and `is_econsent`.
 
+Two optional parameters narrow the result. Each takes an array (`item_ids[]=24&item_ids[]=26`) or a comma-separated list (`item_ids=24,26`). If you give both, an item must match both.
+
+| Parameter | Returns only |
+|---|---|
+| `item_ids` | the items with these IDs |
+| `records` | the items for these REDCap record names |
+
+As with REDCap's Export Records, any IDs or records that don't match an item the user can see are left out of the result rather than causing an error. A request that matches nothing returns an empty list.
+
 ```sh
+# Every item
 curl -F token=$TOKEN -F content=externalModule -F prefix=pdf_snapshot_archive_api \
-     -F action=get-item -F item_id=1234 -F returnFormat=json https://redcap.example.org/api/
+     -F action=get-items -F returnFormat=json https://redcap.example.org/api/
+
+# Items 24 and 26
+curl -F token=$TOKEN -F content=externalModule -F prefix=pdf_snapshot_archive_api \
+     -F action=get-items -F "item_ids[]=24" -F "item_ids[]=26" -F returnFormat=json https://redcap.example.org/api/
+
+# Every item for records 1 and 2, as CSV
+curl -F token=$TOKEN -F content=externalModule -F prefix=pdf_snapshot_archive_api \
+     -F action=get-items -F records=1,2 -F returnFormat=csv https://redcap.example.org/api/
 ```
 
 ### get-file
 
-This action downloads the PDF for the item identified by `item_id`.
+This action downloads the PDF for the item identified by `item_id`. It takes one item per call.
 
 ```sh
 curl -F token=$TOKEN -F content=externalModule -F prefix=pdf_snapshot_archive_api \
@@ -85,14 +90,14 @@ The External Module Framework also provides these actions:
 
 | Status | Meaning |
 |---|---|
-| 400 | Missing or invalid `item_id`, an action this module doesn't define, or a token that isn't tied to a project |
+| 400 | A missing or invalid `item_id` for `get-file`, a non-integer value in `item_ids`, an action this module doesn't define, or a token that isn't tied to a project |
 | 403 | The token's user lacks the required rights |
-| 404 | The item doesn't exist, has been deleted, or is outside the user's DAG |
+| 404 | `get-file` only: the item doesn't exist, has been deleted, or is outside the user's DAG |
 | 500 | The file couldn't be read from storage |
 
 ## Example: export the whole archive
 
-[`examples/export_pdf_snapshot_archive.R`](examples/export_pdf_snapshot_archive.R) exports a project's entire PDF Snapshot Archive. It calls `list-items`, then calls `get-item` and `get-file` for every item.
+[`examples/export_pdf_snapshot_archive.R`](examples/export_pdf_snapshot_archive.R) exports a project's entire PDF Snapshot Archive. It calls `get-items` once, then calls `get-file` for every item.
 
 ```sh
 Rscript examples/export_pdf_snapshot_archive.R credentials.csv 123 my_export
@@ -100,15 +105,14 @@ Rscript examples/export_pdf_snapshot_archive.R credentials.csv 123 my_export
 
 The arguments are a credentials file, a project ID and an optional output directory. The credentials file must be in the format `REDCapR::retrieve_credential_local()` reads. The output directory defaults to `pdf_snapshot_archive_pid<project_id>_<date>`. The script writes:
 
-- `pdf_snapshot_archive.csv`, with one row per item. Each row has every `get-item` attribute, plus:
+- `pdf_snapshot_archive.csv`, with one row per item. Each row has every `get-items` attribute, plus:
   - `local_file`: the path of the downloaded PDF.
-  - `details_status`: `ok`, or the `get-item` error.
   - `download_status`: `ok`, or the `get-file` error.
 - `files/`, with every PDF in the archive. Each file is named `<item_id>_<filename>`, so no download can overwrite another.
 
 The script needs R 4.1 or later and the R packages REDCapR, httr2, jsonlite, dplyr, purrr, readr and tibble. The token's user needs the rights listed under [Access rules](#access-rules).
 
-If `get-item` or `get-file` fails for an item, the script records the error and moves on to the next item. This covers HTTP errors such as a missing right, and network errors such as a timeout. When `get-item` fails, the row still has the `item_id`, `doc_name` and `record` from `list-items`.
+If `get-file` fails for an item, the script records the error in `download_status` and moves on to the next item. This covers HTTP errors such as a missing right, and network errors such as a timeout. If `get-items` fails, there is nothing to export, so the script stops.
 
 ## Manual testing
 

@@ -25,9 +25,9 @@ url:
 abstract:
   PDF Snapshot Archive API is a REDCap External Module that extends
   the REDCap API to reach the PDF Snapshot Archive folder of the
-  File Repository. It adds list-items, get-item, and get-file
-  actions so API users can list archived PDF snapshots, read their
-  attributes, and download the files.
+  File Repository. It adds get-items and get-file actions so API
+  users can read the attributes of archived PDF snapshots and
+  download the files.
 keywords:
   - redcap
   - clinical science

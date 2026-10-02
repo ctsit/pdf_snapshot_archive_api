@@ -23,7 +23,7 @@ class ApiError extends \Exception {}
 
 class PdfSnapshotArchiveApi extends AbstractExternalModule {
 
-	// Attributes of an archive row that are never returned by get-item
+	// Attributes of an archive row that are never returned by get-items
 	const HIDDEN_ATTRIBUTES = ['migration_status', 'migration_doc_id'];
 
 	function redcap_module_api($action, $payload, $project_id, $user_id, $format, $returnFormat, $csvDelim) {
@@ -36,10 +36,8 @@ class PdfSnapshotArchiveApi extends AbstractExternalModule {
 			$Proj = new \Project($project_id);
 
 			switch ($action) {
-			case "list-items":
-				return $this->formatResponse($this->listItems($Proj, $rights, $payload), $returnFormat, $csvDelim, "items", "item");
-			case "get-item":
-				return $this->formatResponse($this->getItem($Proj, $rights, $payload), $returnFormat, $csvDelim, "item");
+			case "get-items":
+				return $this->formatResponse($this->getItems($Proj, $rights, $payload), $returnFormat, $csvDelim);
 			case "get-file":
 				return $this->getFile($Proj, $rights, $payload);
 			default:
@@ -99,23 +97,51 @@ class PdfSnapshotArchiveApi extends AbstractExternalModule {
 		return (int)$item_id;
 	}
 
-	function listItems(\Project $Proj, array $rights, array $payload): array {
-		$record = $payload['record'] ?? '';
-		$rows = [];
-		foreach ($this->fetchItems($Proj, $rights) as $file) {
-			if ($record !== '' && $file['record'] !== $record) continue;
-			$rows[] = [
-				'item_id' => (int)$file['doc_id'],
-				'filename' => $file['doc_name'],
-				'record' => $file['record'],
-			];
+	/**
+	 * Returns a payload parameter given either as an array (name[0]=a&name[1]=b)
+	 * or as a comma-separated string, with blanks dropped. Returns null when the
+	 * parameter is absent. With $integers, every value must be a positive integer.
+	 */
+	function parseList(array $payload, string $name, bool $integers = false): ?array {
+		if (!isset($payload[$name])) return null;
+		$values = is_array($payload[$name]) ? $payload[$name] : explode(',', (string)$payload[$name]);
+		$values = array_values(array_filter(array_map(fn($v) => trim((string)$v), $values), fn($v) => $v !== ''));
+		if ($integers) {
+			foreach ($values as $value) {
+				if (!isinteger($value) || (int)$value <= 0) {
+					throw new ApiError("The parameter '$name' must contain only positive integers.", 400);
+				}
+			}
+			$values = array_map('intval', $values);
 		}
-		return $rows;
+		return $values;
 	}
 
-	function getItem(\Project $Proj, array $rights, array $payload): array {
-		$file = $this->fetchItem($Proj, $rights, $payload);
+	/**
+	 * Returns full details of every visible item, optionally narrowed to the
+	 * item_ids and/or records given. Like REDCap's Export Records, ids or records
+	 * that match nothing are left out rather than raising an error.
+	 */
+	function getItems(\Project $Proj, array $rights, array $payload): array {
+		$item_ids = $this->parseList($payload, 'item_ids', true);
+		$records = $this->parseList($payload, 'records');
 
+		$econsent_cache = [];
+		$items = [];
+		foreach ($this->fetchItems($Proj, $rights) as $file) {
+			if ($item_ids !== null && !in_array((int)$file['doc_id'], $item_ids, true)) continue;
+			if ($records !== null && !in_array((string)$file['record'], $records, true)) continue;
+			$items[] = $this->itemDetails($Proj, $file, $econsent_cache);
+		}
+		return $items;
+	}
+
+	/**
+	 * Every attribute of one archive row except the file itself, plus attributes
+	 * derived from project metadata as shown in the File Repository.
+	 * $econsent_cache holds econsentEnabledForSurvey() results by survey_id.
+	 */
+	function itemDetails(\Project $Proj, array $file, array &$econsent_cache): array {
 		$item = ['item_id' => (int)$file['doc_id']];
 		foreach ($file as $key => $value) {
 			if (in_array($key, self::HIDDEN_ATTRIBUTES)) continue;
@@ -126,13 +152,14 @@ class PdfSnapshotArchiveApi extends AbstractExternalModule {
 			unset($item['ip']);
 		}
 
-		// Attributes derived from project metadata, as shown in the File Repository
 		$event_id = $file['event_id'];
+		$survey_id = $file['survey_id'];
+		$econsent_cache[$survey_id] ??= \Econsent::econsentEnabledForSurvey($survey_id);
 		$item['form_name'] = $this->formName($Proj, $file);
-		$item['survey_title'] = strip_tags($Proj->surveys[$file['survey_id']]['title'] ?? "");
+		$item['survey_title'] = strip_tags($Proj->surveys[$survey_id]['title'] ?? "");
 		$item['event_name'] = $Proj->longitudinal ? ($Proj->getUniqueEventNames($event_id) ?: "") : "";
 		$item['arm_num'] = $Proj->eventInfo[$event_id]['arm_num'] ?? "";
-		$item['is_econsent'] = (\Econsent::econsentEnabledForSurvey($file['survey_id'])
+		$item['is_econsent'] = ($econsent_cache[$survey_id]
 			|| trim($file['identifier'] . $file['version'] . $file['type']) != '') ? 1 : 0;
 
 		return $item;
@@ -181,17 +208,16 @@ class PdfSnapshotArchiveApi extends AbstractExternalModule {
 	}
 
 	/**
-	 * Formats a list of rows (when $item_tag is given) or a single row as json, csv, or xml.
+	 * Formats a list of rows as json, csv, or xml (<items><item>...</item></items>).
 	 */
-	function formatResponse(array $data, $returnFormat, $csvDelim, string $root_tag, ?string $item_tag = null): array {
-		$rows = $item_tag === null ? [$data] : $data;
+	function formatResponse(array $rows, $returnFormat, $csvDelim): array {
 		switch ($returnFormat) {
 		case "json":
-			return $this->framework->apiJsonResponse($data);
+			return $this->framework->apiJsonResponse($rows);
 		case "csv":
 			return $this->framework->apiCsvResponse($this->rowsToColumns($rows), $csvDelim);
 		case "xml":
-			return $this->framework->apiResponse($this->rowsToXml($rows, $root_tag, $item_tag));
+			return $this->framework->apiResponse($this->rowsToXml($rows));
 		default:
 			throw new ApiError("Return format '$returnFormat' is not supported.", 406);
 		}
@@ -207,26 +233,19 @@ class PdfSnapshotArchiveApi extends AbstractExternalModule {
 				$columns[$key][] = $value;
 			}
 		}
-		// Keep a header row for an empty list-items response
-		return empty($columns) ? ['item_id' => [], 'filename' => [], 'record' => []] : $columns;
+		// Keep a header row for an empty response
+		return empty($columns) ? ['item_id' => []] : $columns;
 	}
 
-	function rowsToXml(array $rows, string $root_tag, ?string $item_tag): string {
-		$element = function (array $row, string $tag): string {
-			$xml = "<$tag>";
+	function rowsToXml(array $rows): string {
+		$xml = '<?xml version="1.0" encoding="UTF-8" ?>' . "\n<items>";
+		foreach ($rows as $row) {
+			$xml .= "<item>";
 			foreach ($row as $key => $value) {
 				$xml .= "<$key>" . htmlspecialchars((string)$value, ENT_XML1 | ENT_QUOTES, 'UTF-8') . "</$key>";
 			}
-			return $xml . "</$tag>";
-		};
-		$xml = '<?xml version="1.0" encoding="UTF-8" ?>' . "\n";
-		if ($item_tag === null) {
-			return $xml . $element($rows[0], $root_tag);
+			$xml .= "</item>";
 		}
-		$xml .= "<$root_tag>";
-		foreach ($rows as $row) {
-			$xml .= $element($row, $item_tag);
-		}
-		return $xml . "</$root_tag>";
+		return $xml . "</items>";
 	}
 }
