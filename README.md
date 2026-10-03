@@ -1,5 +1,7 @@
 # PDF Snapshot Archive API
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23108565.svg)](https://doi.org/10.5281/zenodo.23108565)
+
 This REDCap External Module extends the REDCap API so that API users can read the details of, and download, the items in the **PDF Snapshot Archive** folder of a project's File Repository.
 
 REDCap's File Repository API methods can't reach this folder. It is a virtual folder built from `redcap_surveys_pdf_archive`, not a regular File Repository folder. It holds PDF snapshots created by PDF Snapshot triggers and by the e-Consent Framework.
