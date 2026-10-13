@@ -8,11 +8,14 @@ REDCap's File Repository API methods can't reach this folder. It is a virtual fo
 
 ## Prerequisites
 
-- REDCap >= 17.5.0
+- REDCap >= 17.0.1
+- PHP >= 8.0.0
+
+The module has been tested only on REDCap 17.5.0 with PHP 8.3.33 and 8.2.33.
 
 ## Installation
 
-- Clone this repo into `<redcap-root>/modules/pdf_snapshot_archive_api_v1.0.0`.
+- Install the module from the [REDCap Repo](https://redcap.vumc.org/consortium/modules/index.php) via Control Center > External Modules > View modules available in the REDCap Repo, or clone this repo into `<redcap-root>/modules/pdf_snapshot_archive_api_v<version>`.
 - Enable the module in the Control Center, then enable it on each project that needs it.
 
 ## Access rules

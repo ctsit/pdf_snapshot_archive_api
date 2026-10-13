@@ -7,7 +7,9 @@ use ExternalModules\AbstractExternalModule;
 // https://github.com/vanderbilt-redcap/external-module-framework-docs/blob/main/api.md
 //
 // REDCap core has no public API for the PDF Snapshot Archive, so this module
-// relies on core internals verified against REDCap 17.5.0:
+// relies on core internals. They were verified against REDCap 17.5.0, and the
+// module was tested only on REDCap 17.5.0 with PHP 8.3.33 and 8.2.33, although
+// config.json allows REDCap >= 17.0.1 and PHP >= 8.0.0:
 // - \PdfSnapshot::getPdfSnapshotArchiveFiles() (Classes/PdfSnapshot.php) supplies
 //   the archive rows, exactly as the File Repository page lists them.
 // - \Econsent::econsentEnabledForSurvey() (Classes/Econsent.php) flags e-Consent PDFs.
